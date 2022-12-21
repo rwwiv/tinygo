@@ -186,10 +186,24 @@ func MakeGCStackSlots(mod llvm.Module) bool {
 				// be optimized if needed.
 			}
 
-			if ptr := stripPointerCasts(ptr); !ptr.IsAAllocaInst().IsNil() {
+			ptrStripped := stripPointerCasts(ptr)
+			if !ptrStripped.IsAAllocaInst().IsNil() {
 				// Allocas don't need to be tracked because they are allocated
 				// on the C stack which is scanned separately.
 				continue
+			}
+			if !ptrStripped.IsACallInst().IsNil() {
+				// A call that does an allocation (runtime.alloc or other
+				// functions) cannot be a tail call after this transformation
+				// pass because 'tail' means that stack objects are ignored.
+				// For more information, see:
+				// https://llvm.org/docs/LangRef.html#call-instruction
+				//   > [tail and musttail] markers imply that the callee does
+				//   > not access allocas from the caller.
+				// This may have been true before this transformation, but won't
+				// be true afterwards as the gc.stackobject alloca will be read
+				// by the GC.
+				ptrStripped.SetTailCall(false)
 			}
 			pointers = append(pointers, ptr)
 		}
